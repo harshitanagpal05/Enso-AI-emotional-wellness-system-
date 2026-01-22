@@ -1,0 +1,12 @@
+fastapi
+uvicorn
+python-multipart
+opencv-python-headless
+fer
+tensorflow-cpu
+torch
+torchvision
+pandas
+numpy
+textblob
+pillow
