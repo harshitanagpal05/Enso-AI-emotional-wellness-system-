@@ -24,6 +24,7 @@ export default function ChatPage() {
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
   const [user, setUser] = useState<any>(null);
+  const [profile, setProfile] = useState<{ nickname?: string; bio?: string } | null>(null);
   const [lastMood, setLastMood] = useState<string | null>(null);
   const [backendUrl, setBackendUrl] = useState(DEFAULT_BACKEND_URL);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -44,6 +45,7 @@ export default function ChatPage() {
         setUser(user);
         fetchMessages(user.id);
         fetchLastMood(user.id);
+        fetchProfile(user.id);
       }
     });
   }, [router]);
@@ -53,6 +55,16 @@ export default function ChatPage() {
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
     }
   }, [messages]);
+
+  const fetchProfile = async (userId: string) => {
+    const { data, error } = await supabase
+      .from("profiles")
+      .select("nickname, bio")
+      .eq("id", userId)
+      .single();
+    
+    if (data) setProfile(data);
+  };
 
   const fetchMessages = async (userId: string) => {
     const { data, error } = await supabase
@@ -103,16 +115,18 @@ export default function ChatPage() {
       if (userMsgError) throw userMsgError;
       setMessages((prev) => [...prev, savedUserMsg]);
 
-      // 2. Call Backend AI
-      const response = await fetch(`${backendUrl}/chat`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          message: userMessage,
-          current_mood: lastMood,
-          history: messages.slice(-5).map(m => ({ role: m.role, content: m.content }))
-        })
-      });
+        // 2. Call Backend AI
+        const response = await fetch(`${backendUrl}/chat`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            message: userMessage,
+            current_mood: lastMood,
+            nickname: profile?.nickname,
+            bio: profile?.bio,
+            history: messages.slice(-5).map(m => ({ role: m.role, content: m.content }))
+          })
+        });
 
       if (!response.ok) {
         const errorText = await response.text();
