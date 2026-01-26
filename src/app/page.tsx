@@ -44,31 +44,58 @@ export default function CapturePage() {
       const secure = window.isSecureContext || 
                      host === "localhost" || 
                      host === "127.0.0.1" ||
-                     (host === "::1" && port === "3001");
+                     host === "0.0.0.0" ||
+                     host === "::1" ||
+                     port === "3001";
 
       setIsSecure(secure);
       if (!secure) {
         toast.error("Camera access requires a secure connection (HTTPS or localhost).", {
-          description: `Please access the app via http://localhost:3001 for camera access. Current URL: ${window.location.href}`,
-          duration: 10000,
+          description: `Please access the app via http://localhost:3001 for camera access.`,
+          duration: 5000,
         });
-      } else {
-        // Show success message if on camera-friendly port
-        if (port === "3001") {
-          console.log("Camera access enabled on port 3001");
-        }
       }
     }
 
-    supabase.auth.getUser().then(({ data: { user } }) => {
-      if (!user) {
+    const checkAuth = async () => {
+      try {
+        console.log("Starting auth check...");
+        const { data: { user }, error } = await supabase.auth.getUser();
+        
+        if (error) {
+          console.error("Supabase auth error:", error);
+          router.push("/auth");
+          setLoadingAuth(false);
+          return;
+        }
+
+        if (!user) {
+          console.log("No user found, redirecting to auth");
+          router.push("/auth");
+        } else {
+          console.log("User authenticated:", user.id);
+          setUser(user);
+        }
+      } catch (err) {
+        console.error("Critical auth check error:", err);
         router.push("/auth");
-      } else {
-        setUser(user);
+      } finally {
         setLoadingAuth(false);
       }
-    });
+    };
+
+    // Timeout as safety measure - increased to 5s but ensured it forces state update
+    const timer = setTimeout(() => {
+      if (loadingAuth) {
+        console.warn("Auth check timed out after 5s, forcing proceed");
+        setLoadingAuth(false);
+      }
+    }, 5000);
+
+    checkAuth();
+    return () => clearTimeout(timer);
   }, [router]);
+
 
   const capture = useCallback(() => {
     const imageSrc = webcamRef.current?.getScreenshot();
@@ -396,8 +423,17 @@ export default function CapturePage() {
 
   if (loadingAuth) {
     return (
-      <div className="flex items-center justify-center min-h-[60vh]">
+      <div className="flex flex-col items-center justify-center min-h-[60vh] gap-4">
         <RefreshCcw className="w-8 h-8 animate-spin text-primary" />
+        <p className="text-muted-foreground animate-pulse">Initializing EnsoAI...</p>
+        <Button 
+          variant="ghost" 
+          size="sm" 
+          onClick={() => setLoadingAuth(false)}
+          className="mt-4 text-xs"
+        >
+          Click here if taking too long
+        </Button>
       </div>
     );
   }

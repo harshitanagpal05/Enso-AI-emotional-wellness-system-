@@ -177,214 +177,82 @@ def load_personal_pytorch_model():
         
         # Try different loading strategies
         model = None
+        state_dict = None
         
-        # Strategy 1: Load as complete model (if saved as full model)
         if isinstance(checkpoint, nn.Module):
             model = checkpoint
-            model.eval()
-        # Strategy 2: Load from state_dict - detect ResNet architecture
         elif isinstance(checkpoint, dict):
-            # Check if it's a ResNet architecture (has layer1, layer2, etc.)
-            if any('layer' in k for k in checkpoint.keys()):
-                # Try ResNet-34 first (most common)
-                try:
-                    model = resnet34_emotion(num_classes=7)
-                    model.load_state_dict(checkpoint, strict=False)
-                    model.eval()
-                    print("   Loaded as ResNet-34")
-                except:
-                    # Try ResNet-50
-                    try:
-                        model = resnet50_emotion(num_classes=7)
-                        model.load_state_dict(checkpoint, strict=False)
-                        model.eval()
-                        print("   Loaded as ResNet-50")
-                    except:
-                        # Try with state_dict wrapper
-                        if 'state_dict' in checkpoint:
-                            state_dict = checkpoint['state_dict']
-                            model = resnet34_emotion(num_classes=7)
-                            model.load_state_dict(state_dict, strict=False)
-                            model.eval()
-                            print("   Loaded as ResNet-34 (from state_dict)")
-                        else:
-                            raise Exception("Could not determine ResNet variant")
-            # Strategy 3: Try simple CNN (for older models) - fallback removed for now
-            # If model doesn't match ResNet, it will raise an error
-            else:
-                raise Exception("Model architecture not recognized. Expected ResNet structure.")
+            state_dict = checkpoint.get('state_dict', checkpoint)
         else:
             raise Exception("Unknown checkpoint format")
+
+        if state_dict:
+            # Detect architecture from state_dict keys and shapes
+            is_bottleneck = any('conv3' in k for k in state_dict.keys())
+            num_classes = 7 # Default
+            
+            # Detect num_classes from fc.weight or equivalent
+            if 'fc.weight' in state_dict:
+                num_classes = state_dict['fc.weight'].shape[0]
+                in_features = state_dict['fc.weight'].shape[1]
+                print(f"   Detected model: {num_classes} classes, {in_features} features")
+            
+            if is_bottleneck:
+                # ResNet-50/101/152
+                model = resnet50_emotion(num_classes=num_classes)
+                print("   Using ResNet-50 (Bottleneck) architecture")
+            else:
+                # ResNet-18/34
+                model = resnet34_emotion(num_classes=num_classes)
+                print("   Using ResNet-34 (BasicBlock) architecture")
+            
+            model.load_state_dict(state_dict, strict=False)
+            model.eval()
         
-        model.to(device)
-        print(f"✅ Loaded personal PyTorch model from {PERSONAL_MODEL_PATH}")
-        print(f"   Device: {device}, Image size: {pytorch_model_config['img_size']}")
-        return model
-        
+        if model:
+            model.to(device)
+            print(f"✅ Loaded personal PyTorch model from {PERSONAL_MODEL_PATH}")
+            return model
+            
     except Exception as e:
         print(f"⚠️ Failed to load personal PyTorch model: {e}")
-        print(f"   Attempting to use model architecture inference...")
         import traceback
         traceback.print_exc()
         return None
 
-def load_custom_model():
-    global custom_model, personal_pytorch_model, face_cascade, model_config
-    
-    # Load personal PyTorch model first (highest priority)
-    personal_pytorch_model = load_personal_pytorch_model()
-    
-    if os.path.exists(CONFIG_PATH):
-        try:
-            with open(CONFIG_PATH, 'r') as f:
-                config = json.load(f)
-                model_config['img_size'] = config.get('img_size', 96)
-                print(f"Loaded model config: {config}")
-        except Exception as e:
-            print(f"Config load error: {e}")
-    
-    if os.path.exists(MODEL_PATH):
-        try:
-            from tensorflow import keras
-            custom_model = keras.models.load_model(MODEL_PATH, compile=False)
-            custom_model.compile(optimizer='adam', loss='categorical_crossentropy', metrics=['accuracy'])
-            print(f"Loaded custom Kaggle-trained model from {MODEL_PATH}")
-            print(f"Model input shape: {custom_model.input_shape}")
-        except Exception as e:
-            print(f"Failed to load custom model: {e}")
-            custom_model = None
-    else:
-        print(f"Custom model not found at {MODEL_PATH}. Using fallback FER library.")
-        custom_model = None
-    
-    cascade_path = cv2.data.haarcascades + 'haarcascade_frontalface_default.xml'
-    face_cascade = cv2.CascadeClassifier(cascade_path)
-
-load_custom_model()
-
-def preprocess_face_for_model(face_img):
-    img_size = model_config.get('img_size', 96)
-    
-    if len(face_img.shape) == 2:
-        face_rgb = cv2.cvtColor(face_img, cv2.COLOR_GRAY2RGB)
-    else:
-        face_rgb = cv2.cvtColor(face_img, cv2.COLOR_BGR2RGB)
-    
-    face_resized = cv2.resize(face_rgb, (img_size, img_size))
-    
-    face_normalized = face_resized / 255.0
-    
-    face_input = np.expand_dims(face_normalized, axis=0)
-    return face_input
-
-def preprocess_face_for_pytorch(face_img):
-    """Preprocess face image for PyTorch model (ResNet expects 224x224)"""
-    img_size = 224  # ResNet standard input size
-    device = pytorch_model_config.get('device', 'cpu')
-    
-    if len(face_img.shape) == 2:
-        face_rgb = cv2.cvtColor(face_img, cv2.COLOR_GRAY2RGB)
-    else:
-        face_rgb = cv2.cvtColor(face_img, cv2.COLOR_BGR2RGB)
-    
-    # Convert to PIL Image for torchvision transforms
-    pil_image = Image.fromarray(face_rgb)
-    
-    # Define transforms (ImageNet normalization for ResNet)
-    transform = transforms.Compose([
-        transforms.Resize((img_size, img_size)),
-        transforms.ToTensor(),
-        transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
-    ])
-    
-    # Apply transforms and add batch dimension
-    tensor_image = transform(pil_image).unsqueeze(0)
-    tensor_image = tensor_image.to(device)
-    
-    return tensor_image
-
-def detect_emotion_custom_model(img):
-    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-    
-    clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
-    enhanced = clahe.apply(gray)
-    
-    faces = face_cascade.detectMultiScale(
-        enhanced,
-        scaleFactor=1.1,
-        minNeighbors=5,
-        minSize=(48, 48),
-        flags=cv2.CASCADE_SCALE_IMAGE
-    )
-    
-    if len(faces) == 0:
-        faces = face_cascade.detectMultiScale(
-            gray,
-            scaleFactor=1.05,
-            minNeighbors=3,
-            minSize=(30, 30)
-        )
-    
-    if len(faces) == 0:
-        print("DEBUG: No face detected")
-        return "neutral", 0.3
-    
-    if len(faces) > 1:
-        faces = sorted(faces, key=lambda f: f[2] * f[3], reverse=True)
-    
-    x, y, w, h = faces[0]
-    padding = int(0.15 * w)
-    x1 = max(0, x - padding)
-    y1 = max(0, y - padding)
-    x2 = min(img.shape[1], x + w + padding)
-    y2 = min(img.shape[0], y + h + padding)
-    
-    face_roi = img[y1:y2, x1:x2]
-    
-    face_input = preprocess_face_for_model(face_roi)
-    
-    predictions = custom_model.predict(face_input, verbose=0)[0]
-    
-    top_indices = np.argsort(predictions)[::-1][:3]
-    print(f"DEBUG: Top 3 predictions:")
-    for idx in top_indices:
-        print(f"  {EMOTIONS[idx]}: {predictions[idx]:.3f}")
-    
-    top_idx = top_indices[0]
-    top_emotion = EMOTIONS[top_idx]
-    confidence = float(predictions[top_idx])
-    
-    return top_emotion, confidence
-
-def detect_emotion_fer_fallback(img):
-    from fer.fer import FER
-    detector = FER(mtcnn=True)
-    
-    results = detector.detect_emotions(img)
-    
-    if not results:
-        gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-        clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8,8))
-        enhanced_gray = clahe.apply(gray)
-        enhanced_img = cv2.cvtColor(enhanced_gray, cv2.COLOR_GRAY2BGR)
-        results = detector.detect_emotions(enhanced_img)
-    
-    if not results:
-        print("DEBUG: FER - No face detected")
-        return "neutral", 0.0
-    
-    emotions = results[0]["emotions"]
-    print(f"DEBUG: FER Predictions: {emotions}")
-    
-    top_emotion = max(emotions, key=emotions.get)
-    confidence = emotions[top_emotion]
-    
-    print(f"DEBUG: FER Top emotion: {top_emotion} ({confidence})")
-    
-    return top_emotion, confidence
+def preprocess_face_for_pytorch(face_roi):
+    """Preprocess face ROI for personal PyTorch model"""
+    try:
+        img_size = pytorch_model_config.get('img_size', 48)
+        
+        # Convert BGR to RGB
+        face_rgb = cv2.cvtColor(face_roi, cv2.COLOR_BGR2RGB)
+        
+        # Resize and normalize
+        # Note: If the model was trained on grayscale, this should be adjusted.
+        # But the ResNet architecture defined above uses 3 input channels (nn.Conv2d(3, 64, ...))
+        pil_img = Image.fromarray(face_rgb)
+        
+        preprocess = transforms.Compose([
+            transforms.Resize((img_size, img_size)),
+            transforms.ToTensor(),
+            transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
+        ])
+        
+        input_tensor = preprocess(pil_img)
+        input_batch = input_tensor.unsqueeze(0)
+        
+        return input_batch.to(pytorch_model_config['device'])
+    except Exception as e:
+        print(f"Error in preprocessing: {e}")
+        # Return a dummy tensor if preprocessing fails
+        return torch.zeros((1, 3, 48, 48)).to(pytorch_model_config['device'])
 
 def detect_emotion_pytorch_model(img):
     """Detect emotion using personal PyTorch model"""
+    if personal_pytorch_model is None:
+        return "neutral", 0.0
+        
     gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
     
     clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
@@ -426,19 +294,57 @@ def detect_emotion_pytorch_model(img):
     face_input = preprocess_face_for_pytorch(face_roi)
     
     # Get predictions
+    personal_pytorch_model.eval()
     with torch.no_grad():
         outputs = personal_pytorch_model(face_input)
         probabilities = torch.nn.functional.softmax(outputs, dim=1)
         predictions = probabilities[0].cpu().numpy()
     
+    # Map classes
+    num_classes = len(predictions)
+    personal_emotions = EMOTIONS
+    if num_classes == 2:
+        personal_emotions = ['happy', 'sad']
+    elif num_classes != 7:
+        # Generic names if unknown count
+        personal_emotions = [f"emotion_{i}" for i in range(num_classes)]
+        
     top_indices = np.argsort(predictions)[::-1][:3]
-    print(f"DEBUG: Top 3 predictions (Personal PyTorch Model):")
+    print(f"DEBUG: Top predictions (Personal PyTorch Model):")
     for idx in top_indices:
-        print(f"  {EMOTIONS[idx]}: {predictions[idx]:.3f}")
+        if idx < len(personal_emotions):
+            print(f"  {personal_emotions[idx]}: {predictions[idx]:.3f}")
     
     top_idx = top_indices[0]
-    top_emotion = EMOTIONS[top_idx]
+    top_emotion = personal_emotions[top_idx] if top_idx < len(personal_emotions) else "neutral"
     confidence = float(predictions[top_idx])
+    
+    return top_emotion, confidence
+
+def detect_emotion_fer_fallback(img):
+    from fer.fer import FER
+    detector = FER(mtcnn=True)
+    
+    results = detector.detect_emotions(img)
+    
+    if not results:
+        gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+        clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8,8))
+        enhanced_gray = clahe.apply(gray)
+        enhanced_img = cv2.cvtColor(enhanced_gray, cv2.COLOR_GRAY2BGR)
+        results = detector.detect_emotions(enhanced_img)
+    
+    if not results:
+        print("DEBUG: FER - No face detected")
+        return "neutral", 0.0
+    
+    emotions = results[0]["emotions"]
+    print(f"DEBUG: FER Predictions: {emotions}")
+    
+    top_emotion = max(emotions, key=emotions.get)
+    confidence = emotions[top_emotion]
+    
+    print(f"DEBUG: FER Top emotion: {top_emotion} ({confidence})")
     
     return top_emotion, confidence
 
@@ -471,3 +377,15 @@ def map_emotion_to_mood(emotion):
         "neutral": "stable and calm state"
     }
     return mapping.get(emotion.lower(), "stable and calm state")
+
+# Initialize models and cascades
+print("Initializing Emotion Detection Models...")
+face_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_frontalface_default.xml')
+if face_cascade.empty():
+    print("⚠️ Warning: Could not load Haar cascade. Face detection might fail.")
+
+personal_pytorch_model = load_personal_pytorch_model()
+if personal_pytorch_model is not None:
+    print("✅ Personal PyTorch model initialized.")
+else:
+    print("ℹ️ Personal PyTorch model not loaded, using fallback.")

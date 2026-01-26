@@ -135,24 +135,33 @@ async def chat(request: ChatRequest):
         if has_word("hello", message) or has_word("hi", message) or has_word("hey", message) or has_word("greetings", message):
             suggestions = get_suggestions_text(2)
             greetings = [
-                f"Hello! I'm Enso Buddy. I noticed you've been feeling {mood} lately. Here are some suggestions that might help:\n\n{suggestions}\n\nHow can I support you today?",
-                f"Hi there! I'm here for you. I see you've been feeling {mood} recently. Based on your mood, I'd suggest:\n\n{suggestions}\n\nWhat's on your mind?",
-                f"Hey! Great to see you. Since you're feeling {mood}, here's what might help:\n\n{suggestions}\n\nHow are you doing today? I'm here to listen and help."
+                f"Hello! I'm Enso Buddy, your wellness companion. I'm here to support you in whatever you're feeling today.\n\nI noticed you've been feeling {mood} lately. Here are a couple of things that might help:\n\n{suggestions}\n\nWhat can I do for you right now? You can ask me for wellness tips, tell me about your day, or we can just chat.",
+                f"Hi there! I'm Enso Buddy. I see you've been feeling {mood} recently. Based on that, I'd suggest:\n\n{suggestions}\n\nHow are you doing today? I'm here to listen if you want to share anything.",
+                f"Hey! Great to see you. Since your recent mood has been {mood}, here's something that might help:\n\n{suggestions}\n\nI can help with mindfulness, provide personalized recommendations, or just be a supportive ear. How's your day going?"
             ]
             response = greetings[hash(message) % len(greetings)]
         
-        # Check for help requests - EXPANDED to catch more variations
-        elif (has_word("help", message) or has_word("support", message) or has_word("advice", message) or 
-              has_word("suggest", message) or has_word("recommend", message) or has_word("what", message) or
-              has_word("how", message) or has_word("can you", message) or has_word("should", message) or
-              has_word("need", message) or has_word("want", message) or has_word("give", message)):
+        # Check for capabilities / how it works
+        elif (has_word("what", message) and (has_word("do", message) or has_word("can", message))) or \
+             (has_word("how", message) and (has_word("work", message) or has_word("help", message))):
+            response = (
+                "I'm Enso Buddy, your AI wellness companion! I'm designed to help you maintain emotional balance. Here's exactly how I can help:\n\n"
+                "1. **Analyze Your Mood**: Go to the Home page and capture a photo. I'll use AI to detect your emotion.\n"
+                "2. **Personalized Recommendations**: Based on your mood ({mood}), I suggest specific music, quotes, and wellness activities.\n"
+                "3. **Mood Journaling**: You can write notes about your day, and I'll analyze the sentiment to give you insights.\n"
+                "4. **Wellness Challenges**: I track your progress on mindfulness and positivity challenges in your Dashboard.\n"
+                "5. **Mindfulness Exercises**: Ask me for a 'breathing exercise' or 'grounding technique' right here!\n\n"
+                "What would you like to start with? I can give you a tip for your current {mood} state right now."
+            ).format(mood=mood)
+        
+        # Check for specific "do something" or "help me with X" requests
+        elif has_word("recommend", message) or has_word("suggest", message) or has_word("tips", message) or has_word("advice", message):
             suggestions = get_suggestions_text(4)
-            help_responses = [
-                f"I'm here to listen and help! Since you've been feeling {mood}, here are personalized suggestions:\n\n{suggestions}\n\nWould you like to talk about your day, or need more specific wellness tips?",
-                f"I'm here for you! Based on your {mood} mood, here are my recommendations:\n\n{suggestions}\n\nYou can share what's on your mind, ask for more tips, or we can just chat. What would help you most right now?",
-                f"I'm here to support you! Given your {mood} state, here's what might help:\n\n{suggestions}\n\nFeel free to share what's bothering you, or ask me about mindfulness techniques, breathing exercises, or anything else on your mind."
-            ]
-            response = help_responses[hash(message) % len(help_responses)]
+            response = (
+                f"I've got some personalized recommendations for you! Since you've been in a {mood} state, "
+                f"these might be particularly helpful:\n\n{suggestions}\n\n"
+                "Would you like more options for a different category, like just music or just activities?"
+            )
         
         # Check for gratitude
         elif has_word("thank", message) or has_word("thanks", message) or has_word("appreciate", message):
