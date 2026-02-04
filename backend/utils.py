@@ -321,13 +321,33 @@ def detect_emotion_pytorch_model(img):
     
     return top_emotion, confidence
 
+# Global FER detector - initialize once for speed
+fer_detector = None
+
+def get_fer_detector():
+    """Get or create cached FER detector (much faster than creating each time)"""
+    global fer_detector
+    if fer_detector is None:
+        from fer.fer import FER
+        # Use mtcnn=False for MUCH faster detection (uses OpenCV cascade instead)
+        fer_detector = FER(mtcnn=False)
+        print("✅ FER detector initialized (fast mode)")
+    return fer_detector
+
 def detect_emotion_fer_fallback(img):
-    from fer.fer import FER
-    detector = FER(mtcnn=True)
+    detector = get_fer_detector()
+    
+    # Resize image for faster processing if too large
+    max_dim = 640
+    h, w = img.shape[:2]
+    if max(h, w) > max_dim:
+        scale = max_dim / max(h, w)
+        img = cv2.resize(img, (int(w * scale), int(h * scale)))
     
     results = detector.detect_emotions(img)
     
     if not results:
+        # Try with enhanced contrast
         gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
         clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8,8))
         enhanced_gray = clahe.apply(gray)
@@ -336,7 +356,7 @@ def detect_emotion_fer_fallback(img):
     
     if not results:
         print("DEBUG: FER - No face detected")
-        return "neutral", 0.0
+        return "neutral", 0.5
     
     emotions = results[0]["emotions"]
     print(f"DEBUG: FER Predictions: {emotions}")
@@ -355,8 +375,14 @@ def detect_emotion_from_image(image_bytes):
     if img is None:
         return None, 0
     
-    # Priority: Personal PyTorch model > Custom TensorFlow model > FER fallback
+    # Check if personal model has limited classes (only 2 = happy/sad)
+    # In that case, use FER for better 7-emotion detection
     if personal_pytorch_model is not None:
+        # Check the fc layer output size
+        num_classes = personal_pytorch_model.fc.out_features if hasattr(personal_pytorch_model, 'fc') else 7
+        if num_classes < 7:
+            print(f"DEBUG: Personal model has only {num_classes} classes, using FER for full emotion range")
+            return detect_emotion_fer_fallback(img)
         print("DEBUG: Using personal PyTorch face recognition model")
         return detect_emotion_pytorch_model(img)
     elif custom_model is not None:
@@ -382,10 +408,15 @@ def map_emotion_to_mood(emotion):
 print("Initializing Emotion Detection Models...")
 face_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_frontalface_default.xml')
 if face_cascade.empty():
-    print("⚠️ Warning: Could not load Haar cascade. Face detection might fail.")
+    print("Warning: Could not load Haar cascade. Face detection might fail.")
 
 personal_pytorch_model = load_personal_pytorch_model()
 if personal_pytorch_model is not None:
-    print("✅ Personal PyTorch model initialized.")
+    print("Personal PyTorch model initialized.")
 else:
-    print("ℹ️ Personal PyTorch model not loaded, using fallback.")
+    print("Personal PyTorch model not loaded, using fallback.")
+
+# Pre-initialize FER detector for faster first detection
+print("Pre-initializing FER detector...")
+_ = get_fer_detector()
+print("All models ready!")

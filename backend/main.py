@@ -89,209 +89,368 @@ class ChatRequest(BaseModel):
 @app.post("/chat")
 async def chat(request: ChatRequest):
     try:
-        # Simulate AI logic based on message and mood
-        message = request.message.lower().strip()
-        mood = request.current_mood or "stable and calm state"
+        message = request.message.strip()
+        message_lower = message.lower()
+        mood = request.current_mood or "neutral"
         name = request.nickname or "friend"
         bio = request.bio or ""
+        history = request.history or []
         
-        # Map mood to recommendation key
+        # Build conversation context from history
+        conversation_context = ""
+        if history:
+            conversation_context = "\n".join([
+                f"{'User' if h.role == 'user' else 'Enso Buddy'}: {h.content}" 
+                for h in history[-5:]
+            ])
+        
+        # Get mood-based recommendations
         mood_map = {
-            "positive state": "positive state",
-            "low": "low",
+            "positive state": "positive state", "low": "low",
             "frustrated and high stressed": "frustrated and high stressed",
-            "anxious": "anxious",
-            "strong dislike": "strong dislike",
+            "anxious": "anxious", "strong dislike": "strong dislike",
             "shocking and unexpected wonders": "shocking and unexpected wonders",
             "stable and calm state": "stable and calm state",
-            "sad": "low",
-            "happy": "positive state",
-            "angry": "frustrated and high stressed",
-            "fear": "anxious",
+            "sad": "low", "happy": "positive state",
+            "angry": "frustrated and high stressed", "fear": "anxious",
             "neutral": "stable and calm state"
         }
         rec_key = mood_map.get(mood.lower(), "stable and calm state")
+        sample_recs = get_recommendations(rec_key)
         
-        # Simple sentiment analysis for the current message
+        # Analyze user intent with improved detection
         analysis = TextBlob(message)
         sentiment = analysis.sentiment.polarity
         
+        # Detect question types
+        is_question = any(message_lower.startswith(q) for q in ["what", "how", "why", "when", "where", "who", "can", "could", "would", "should", "is", "are", "do", "does", "will"])
+        is_question = is_question or "?" in message
+        
+        # Specific topic detection
+        topics = {
+            "wellness": ["wellness", "health", "self-care", "self care", "wellbeing", "well-being"],
+            "breathing": ["breath", "breathe", "breathing", "inhale", "exhale"],
+            "meditation": ["meditat", "mindful", "calm", "relax", "peace"],
+            "exercise": ["exercise", "workout", "physical", "fitness", "yoga", "stretch"],
+            "sleep": ["sleep", "insomnia", "tired", "rest", "fatigue", "exhausted"],
+            "anxiety": ["anxious", "anxiety", "panic", "nervous", "worry", "worried"],
+            "stress": ["stress", "stressed", "overwhelm", "pressure", "tension"],
+            "sadness": ["sad", "depress", "down", "lonely", "hopeless", "grief", "loss"],
+            "anger": ["angry", "mad", "frustrated", "irritat", "annoy", "furious"],
+            "happiness": ["happy", "joy", "excited", "grateful", "thankful", "great", "good", "awesome"],
+            "relationship": ["friend", "family", "partner", "relationship", "colleague", "parent", "sibling"],
+            "work": ["work", "job", "career", "boss", "office", "deadline", "project"],
+            "motivation": ["motivat", "inspir", "goal", "purpose", "meaning", "drive"],
+            "confidence": ["confiden", "self-esteem", "believe", "doubt", "insecur"],
+            "recommendation": ["recommend", "suggest", "movie", "song", "music", "watch", "listen", "activity"]
+        }
+        
+        detected_topics = []
+        for topic, keywords in topics.items():
+            if any(kw in message_lower for kw in keywords):
+                detected_topics.append(topic)
+        
         response = ""
         
-        # Helper to check for whole words
-        def has_word(word, text):
-            return bool(re.search(rf"\b{word}\b", text))
+        # DIRECT QUESTION ANSWERING - Respond to what user actually asks
         
-        # Helper to get recommendations as formatted text
-        def get_suggestions_text(limit=3):
-            sample_recs = get_recommendations(rec_key)
-            suggestions_list = []
-            if sample_recs:
-                # Prioritize quote, music, activity
-                for rec_type in ["quote", "music", "activity", "movie"]:
-                    type_recs = [r for r in sample_recs if r["type"] == rec_type]
-                    if type_recs and len(suggestions_list) < limit:
-                        rec = type_recs[0]
-                        suggestions_list.append(f"• {rec['content']} - {rec['reason']}")
-            return "\n".join(suggestions_list) if suggestions_list else "I have some personalized recommendations ready for you!"
+        # Greeting
+        if any(message_lower.startswith(g) for g in ["hi", "hello", "hey", "good morning", "good evening", "good afternoon"]):
+            response = f"Hello {name}! I'm Enso Buddy, your wellness companion. I can see your current mood is {mood}. How can I help you today? Feel free to ask me anything about wellness, mindfulness, or just share what's on your mind."
         
-        # Check for common greetings
-        if has_word("hello", message) or has_word("hi", message) or has_word("hey", message) or has_word("greetings", message):
-            suggestions = get_suggestions_text(2)
-            greetings = [
-                f"Hello {name}! I'm Enso Buddy, your wellness companion. I'm here to support you in whatever you're feeling today.\n\nI noticed you've been feeling {mood} lately. Here are a couple of things that might help:\n\n{suggestions}\n\nWhat can I do for you right now? You can ask me for wellness tips, tell me about your day, or we can just chat.",
-                f"Hi {name}! I'm Enso Buddy. I see you've been feeling {mood} recently. Based on that, I'd suggest:\n\n{suggestions}\n\nHow are you doing today? I'm here to listen if you want to share anything.",
-                f"Hey {name}! Great to see you. Since your recent mood has been {mood}, here's something that might help:\n\n{suggestions}\n\nI can help with mindfulness, provide personalized recommendations, or just be a supportive ear. How's your day going?"
-            ]
-            response = greetings[hash(message) % len(greetings)]
-        
-        # Check for capabilities / how it works
-        elif (has_word("what", message) and (has_word("do", message) or has_word("can", message))) or \
-             (has_word("how", message) and (has_word("work", message) or has_word("help", message))):
-            response = (
-                f"I'm Enso Buddy, your AI wellness companion, {name}! I'm designed to help you maintain emotional balance. Here's exactly how I can help:\n\n"
-                "1. **Analyze Your Mood**: Go to the Home page and capture a photo. I'll use AI to detect your emotion.\n"
-                "2. **Personalized Recommendations**: Based on your mood ({mood}), I suggest specific music, quotes, and wellness activities.\n"
-                "3. **Mood Journaling**: You can write notes about your day, and I'll analyze the sentiment to give you insights.\n"
-                "4. **Wellness Challenges**: I track your progress on mindfulness and positivity challenges in your Dashboard.\n"
-                "5. **Mindfulness Exercises**: Ask me for a 'breathing exercise' or 'grounding technique' right here!\n\n"
-                "What would you like to start with? I can give you a tip for your current {mood} state right now."
-            ).format(mood=mood)
-        
-        # Check for specific "do something" or "help me with X" requests
-        elif has_word("recommend", message) or has_word("suggest", message) or has_word("tips", message) or has_word("advice", message):
-            suggestions = get_suggestions_text(4)
-            response = (
-                f"I've got some personalized recommendations for you, {name}! Since you've been in a {mood} state, "
-                f"these might be particularly helpful:\n\n{suggestions}\n\n"
-                "Would you like more options for a different category, like just music or just activities?"
-            )
-        
-        # Check for gratitude
-        elif has_word("thank", message) or has_word("thanks", message) or has_word("appreciate", message):
-            gratitude_responses = [
-                f"You're very welcome, {name}! I'm always here for you.",
-                f"You're so welcome, {name}! It means a lot that you're taking care of yourself. Keep it up!",
-                f"Anytime, {name}! I'm glad I could help. Remember, I'm here whenever you need me."
-            ]
-            response = gratitude_responses[hash(message) % len(gratitude_responses)]
-        
-        # Check for questions about feelings/emotions
-        elif has_word("feel", message) or has_word("feeling", message) or has_word("emotion", message) or has_word("mood", message):
-            suggestions = get_suggestions_text(3)
-            feeling_responses = [
-                f"I understand, {name}. It sounds like you're processing some emotions. Since you've been feeling {mood} lately, this is completely valid. Here are some suggestions:\n\n{suggestions}\n\nWould you like to talk about what's contributing to that?",
-                f"Feelings can be complex, {name}, and your {mood} state tells me you're going through something. Based on your mood, I'd suggest:\n\n{suggestions}\n\nI'm here to listen. How does your current mood relate to what you're experiencing right now?",
-                f"Emotions are valid, {name}, whatever they are. Your {mood} mood is important. Here's what might help:\n\n{suggestions}\n\nWould you like to explore what you're feeling right now? I can help you process it."
-            ]
-            response = feeling_responses[hash(message) % len(feeling_responses)]
-        
-        # Check for stress/anxiety keywords
-        elif has_word("stress", message) or has_word("stressed", message) or has_word("anxious", message) or has_word("anxiety", message) or has_word("worried", message) or has_word("worry", message) or has_word("tension", message):
-            suggestions = get_suggestions_text(3)
-            stress_responses = [
-                f"I hear you, {name}. Stress and anxiety can be overwhelming. Since you're feeling {mood}, here are some suggestions:\n\n{suggestions}\n\nHave you tried any breathing exercises? I can guide you through one if you'd like.",
-                f"It's completely normal to feel stressed or anxious sometimes, {name}. Based on your {mood} mood, I'd suggest:\n\n{suggestions}\n\nWhat's been causing you the most worry lately?",
-                f"Stress is tough, {name}. Remember, it's okay to take breaks and practice self-care. Here's what might help with your {mood} state:\n\n{suggestions}\n\nWhat's one thing that usually helps you feel calmer?"
-            ]
-            response = stress_responses[hash(message) % len(stress_responses)]
-        
-        # Check for sadness/depression keywords
-        elif has_word("sad", message) or has_word("depressed", message) or has_word("down", message) or has_word("lonely", message) or has_word("hopeless", message) or has_word("upset", message):
-            suggestions = get_suggestions_text(3)
-            sad_responses = [
-                f"I'm sorry you're going through this, {name}. It's okay to feel sad. You're not alone. Since you're feeling {mood}, here are some suggestions:\n\n{suggestions}\n\nWould you like to talk about what's making you feel this way?",
-                f"I'm here with you, {name}. Sadness is a valid emotion, and it's okay to not be okay. Based on your {mood} mood, I'd suggest:\n\n{suggestions}\n\nWhat's been weighing on you?",
-                f"I can sense you're going through a tough time, {name}. Remember, this feeling won't last forever. Here's what might help:\n\n{suggestions}\n\nWhat's one small thing that might help you feel a bit better today?"
-            ]
-            response = sad_responses[hash(message) % len(sad_responses)]
-        
-        # Check for anger/frustration keywords
-        elif has_word("angry", message) or has_word("mad", message) or has_word("frustrated", message) or has_word("frustration", message) or has_word("annoyed", message) or has_word("irritated", message):
-            suggestions = get_suggestions_text(3)
-            anger_responses = [
-                f"I understand that anger can be intense, {name}. It's okay to feel this way. Since you're feeling {mood}, here are some suggestions:\n\n{suggestions}\n\nWhat's been triggering these feelings?",
-                f"Anger is a natural emotion, {name}. Sometimes it helps to express it safely. Based on your {mood} mood, I'd suggest:\n\n{suggestions}\n\nWould you like to talk about what's making you feel this way?",
-                f"I hear your frustration, {name}. It's valid. Here's what might help with your {mood} state:\n\n{suggestions}\n\nWhat would help you process these feelings right now?"
-            ]
-            response = anger_responses[hash(message) % len(anger_responses)]
-        
-        # Check for positive keywords
-        elif has_word("happy", message) or has_word("good", message) or has_word("great", message) or has_word("excited", message) or has_word("joy", message) or has_word("grateful", message):
-            positive_responses = [
-                f"That's wonderful to hear, {name}! Your positive energy is contagious. What's making you feel this way?",
-                f"I love hearing that, {name}! It's great that you're in a good space. How can we keep this momentum going?",
-                f"That's fantastic, {name}! Positive moments are worth celebrating. What's contributing to your good mood today?"
-            ]
-            response = positive_responses[hash(message) % len(positive_responses)]
-        
-        # Check for breathing/mindfulness requests
-        elif has_word("breath", message) or has_word("breathe", message) or has_word("meditation", message) or has_word("mindful", message) or has_word("calm", message):
-            mindfulness_responses = [
-                f"Great idea, {name}! Breathing exercises can really help. Try this: inhale for 4 counts, hold for 4, exhale for 4. Repeat a few times. How does that feel?",
-                f"Mindfulness is a powerful tool, {name}. Would you like to try a quick grounding exercise? Name 5 things you can see, 4 you can touch, 3 you can hear, 2 you can smell, and 1 you can taste.",
-                f"Taking time to breathe and be present is so important, {name}. What kind of mindfulness practice would you like to explore?"
-            ]
-            response = mindfulness_responses[hash(message) % len(mindfulness_responses)]
-        
-        # Negative sentiment handling
-        elif sentiment < -0.3:
-            if mood in ["sad", "angry", "fear", "low"]:
-                response = f"I can feel that things are tough right now, {name}, especially since you've been feeling {mood}. It's okay to let it out. What's on your mind? What would help you feel supported right now?"
-            else:
-                response = f"I can sense some heavy emotions in your words, {name}. Do you want to talk more about what's bothering you? I'm here to listen without judgment."
-        
-        # Positive sentiment handling
-        elif sentiment > 0.3:
-            positive_sentiment_responses = [
-                f"That's wonderful to hear, {name}! Your positive energy is contagious. What's making you feel this way?",
-                f"I love your positivity, {name}! It's great to see you in such a good space. How can we keep this momentum going?",
-                f"That's fantastic, {name}! It sounds like things are going well. What's contributing to your good mood?"
-            ]
-            response = positive_sentiment_responses[hash(message) % len(positive_sentiment_responses)]
-        
-        # Check for bio-related personalization
-        elif bio and any(word in message for word in bio.lower().split()):
-            response = f"I noticed you mentioned something related to what you shared in your bio: '{bio}'. How does that tie into how you're feeling today, {name}?"
-        
-        # Default responses based on mood with recommendations - ALWAYS provide suggestions
-        else:
-            suggestions = get_suggestions_text(3)
-            
-            if mood == "sad" or mood == "low" or "low" in mood.lower():
-                default_sad = [
-                    f"I'm here with you, {name}. It's okay to not be okay. Since you've been feeling {mood}, remember this feeling is temporary. Here are some suggestions:\n\n{suggestions}\n\nWhat's on your mind?",
-                    f"I'm listening, {name}. I understand you're going through a tough time. Your {mood} mood tells me you might need extra support. Based on your mood, I'd suggest:\n\n{suggestions}\n\nWould you like to talk about it?",
-                    f"You're not alone, {name}. I can see you've been feeling {mood} lately. Here's what might help:\n\n{suggestions}\n\nWhat would feel helpful - talking, a mindfulness exercise, or something else?"
-                ]
-                response = default_sad[hash(message) % len(default_sad)]
-            elif mood == "happy" or mood == "positive state" or "positive" in mood.lower():
-                default_happy = [
-                    f"It's great to see you in such a good mood, {name}! Your {mood} energy is wonderful. To keep this momentum going, I suggest:\n\n{suggestions}\n\nHow can we keep this positive energy flowing?",
-                    f"I love your positive energy, {name}! Since you're feeling {mood}, this is perfect for trying something new. Here are my recommendations:\n\n{suggestions}\n\nWhat's been making you feel so good?",
-                    f"That's wonderful, {name}! It's great when we're in a positive space like {mood}. Here's what might enhance your mood:\n\n{suggestions}\n\nWhat would you like to explore or talk about?"
-                ]
-                response = default_happy[hash(message) % len(default_happy)]
-            elif "frustrated" in mood.lower() or "stressed" in mood.lower() or mood == "anxious" or "anxious" in mood.lower():
-                default_stress = [
-                    f"I can sense tension, {name}. Your {mood} state suggests you need release. Here are some suggestions:\n\n{suggestions}\n\nWhat's been on your mind? Sometimes talking helps.",
-                    f"It sounds overwhelming, {name}. Since you're feeling {mood}, let's find ways to ground yourself. Based on your mood:\n\n{suggestions}\n\nWhat would help you feel more centered?",
-                    f"I'm here for you, {name}. Your {mood} mood tells me you're dealing with a lot. Here's what might help:\n\n{suggestions}\n\nWhat's one thing causing stress? We can work through it."
-                ]
-                response = default_stress[hash(message) % len(default_stress)]
-            else:
-                default_responses = [
-                    f"I'm listening, {name}. I notice you've been feeling {mood} lately. Here are some suggestions based on your mood:\n\n{suggestions}\n\nTell me more. How are you processing everything?",
-                    f"I'm here for you, {name}. Your current {mood} state is valid. Based on your mood, I'd suggest:\n\n{suggestions}\n\nWhat's on your mind? Feel free to share.",
-                    f"I'm listening, {name}. Since you're in a {mood} state, I want to understand. Here's what might help:\n\n{suggestions}\n\nWhat would you like to talk about?",
-                    f"Tell me more, {name}. I'm here to listen and help. Based on your {mood} mood:\n\n{suggestions}\n\nYour mood matters, and I want to support you."
-                ]
-                response = default_responses[hash(message) % len(default_responses)]
-        
-        # Ensure we always have a response
-        if not response:
-            response = f"I'm here for you, {name}. I notice you've been feeling {mood} lately. Can you tell me more? I'm listening."
+        # What can you do / Help
+        elif is_question and any(w in message_lower for w in ["what can you do", "what do you do", "help me", "how can you help", "what are you"]):
+            response = f"""I'm Enso Buddy, your AI wellness companion! Here's what I can do for you, {name}:
 
+**Wellness Support:**
+- Guide you through breathing exercises and meditation
+- Provide stress management and relaxation techniques
+- Offer advice on sleep, exercise, and self-care
+
+**Emotional Support:**
+- Listen when you need to talk about your feelings
+- Help you process emotions like stress, anxiety, or sadness
+- Celebrate your positive moments with you
+
+**Personalized Recommendations:**
+- Suggest calming music, uplifting movies, or activities based on your mood
+- Your current mood ({mood}) helps me tailor my suggestions
+
+**General Questions:**
+- Answer questions about mental health topics
+- Provide tips and techniques for various wellness areas
+
+What would you like to explore?"""
+        
+        # Breathing exercises
+        elif "breathing" in detected_topics:
+            response = f"""Here's a simple breathing exercise for you, {name}:
+
+**4-7-8 Breathing Technique:**
+1. Breathe in quietly through your nose for **4 seconds**
+2. Hold your breath for **7 seconds**
+3. Exhale completely through your mouth for **8 seconds**
+4. Repeat this cycle 3-4 times
+
+This technique activates your parasympathetic nervous system and helps reduce anxiety. Would you like me to guide you through it step by step, or would you prefer a different technique like box breathing?"""
+        
+        # Meditation/Mindfulness
+        elif "meditation" in detected_topics:
+            response = f"""Here's a quick mindfulness exercise for you, {name}:
+
+**5-4-3-2-1 Grounding Technique:**
+Take a moment to notice:
+- **5 things** you can SEE
+- **4 things** you can TOUCH
+- **3 things** you can HEAR
+- **2 things** you can SMELL
+- **1 thing** you can TASTE
+
+This brings you back to the present moment and helps calm racing thoughts. Would you like a guided body scan meditation or a longer mindfulness practice instead?"""
+        
+        # Sleep issues
+        elif "sleep" in detected_topics:
+            response = f"""Sleep is so important for emotional wellbeing, {name}. Here are some evidence-based tips:
+
+**Better Sleep Habits:**
+1. **Consistent schedule** - Go to bed and wake up at the same time daily
+2. **Wind-down routine** - Start relaxing 1 hour before bed (dim lights, no screens)
+3. **Cool, dark room** - Optimal temperature is 65-68°F (18-20°C)
+4. **Avoid stimulants** - No caffeine after 2pm, limit alcohol
+
+**If you can't sleep:**
+- Try the 4-7-8 breathing technique
+- Don't lie in bed awake for more than 20 minutes - get up and do something calm
+- Avoid checking the clock
+
+What specific sleep challenge are you facing? I can give more targeted advice."""
+        
+        # Anxiety
+        elif "anxiety" in detected_topics:
+            response = f"""I understand anxiety can be overwhelming, {name}. Here are some immediate techniques:
+
+**Quick Anxiety Relief:**
+1. **Ground yourself** - Feel your feet on the floor, notice 5 things around you
+2. **Slow your breathing** - Breathe out longer than you breathe in
+3. **Challenge the thought** - Ask "Is this thought true? What's the evidence?"
+4. **Name it to tame it** - Say "I notice I'm feeling anxious" to create distance
+
+**Longer-term strategies:**
+- Regular exercise (even 10-minute walks help)
+- Limit caffeine and alcohol
+- Practice mindfulness daily
+- Talk to someone you trust
+
+What's making you feel anxious right now? I'm here to listen."""
+        
+        # Stress
+        elif "stress" in detected_topics:
+            suggestions = "\n".join([f"- {r['content']}" for r in sample_recs[:3] if r['type'] in ['activity', 'music']]) if sample_recs else ""
+            response = f"""Stress management is crucial, {name}. Here are effective strategies:
+
+**Immediate Stress Relief:**
+1. **Take 3 deep breaths** - Activates your relaxation response
+2. **Progressive muscle relaxation** - Tense and release each muscle group
+3. **Step outside** - Even 5 minutes of fresh air helps
+4. **Move your body** - Stretch, walk, or shake it out
+
+**Based on your mood, I'd also suggest:**
+{suggestions}
+
+What's causing your stress? Sometimes talking it through helps."""
+        
+        # Sadness
+        elif "sadness" in detected_topics:
+            response = f"""I'm sorry you're feeling down, {name}. Your feelings are valid. Here's what might help:
+
+**When You're Feeling Sad:**
+1. **Allow yourself to feel** - It's okay to cry or feel low
+2. **Reach out** - Talk to a friend, family member, or professional
+3. **Be gentle with yourself** - Do one small kind thing for yourself today
+4. **Move a little** - Even a short walk can shift your mood
+5. **Avoid isolation** - Being around people (even quietly) can help
+
+**Remember:** Sadness is temporary, even when it doesn't feel that way. If these feelings persist for more than two weeks, please consider talking to a mental health professional.
+
+Would you like to talk about what's making you feel this way? I'm here to listen without judgment."""
+        
+        # Anger
+        elif "anger" in detected_topics:
+            response = f"""Anger is a natural emotion, {name}. Here's how to work with it constructively:
+
+**Immediate Anger Management:**
+1. **Pause before reacting** - Count to 10 slowly
+2. **Walk away temporarily** - Give yourself space
+3. **Physical release** - Exercise, punch a pillow, or do jumping jacks
+4. **Cool down literally** - Splash cold water on your face
+
+**Process the Anger:**
+1. What triggered this feeling?
+2. What need isn't being met?
+3. What's in your control to change?
+
+**Express it healthily:**
+- Use "I feel..." statements instead of blaming
+- Write it out in a journal
+- Talk to someone you trust
+
+What's making you feel angry? Sometimes naming it helps."""
+        
+        # Happiness/Positive
+        elif "happiness" in detected_topics:
+            response = f"""That's wonderful to hear, {name}! Let's build on that positive energy.
+
+**Ways to Sustain Your Good Mood:**
+1. **Savor it** - Take a moment to really notice how good you feel
+2. **Write it down** - Journaling about positive moments strengthens them
+3. **Share it** - Tell someone about what's making you happy
+4. **Do more of what's working** - Identify what contributed to this feeling
+
+**Spread the positivity:**
+- Send a kind message to someone
+- Help someone out
+- Express gratitude
+
+What's bringing you joy today? I'd love to hear about it!"""
+        
+        # Recommendations request
+        elif "recommendation" in detected_topics:
+            movie_recs = [r for r in sample_recs if r['type'] == 'movie'][:2]
+            music_recs = [r for r in sample_recs if r['type'] == 'music'][:2]
+            activity_recs = [r for r in sample_recs if r['type'] == 'activity'][:2]
+            
+            response = f"""Based on your {mood} mood, here are my personalized recommendations for you, {name}:
+
+**Movies to Watch:**
+{chr(10).join([f"- {r['content']} - {r['reason']}" for r in movie_recs]) if movie_recs else "- Check out something that matches your mood!"}
+
+**Music to Listen:**
+{chr(10).join([f"- {r['content']} - {r['reason']}" for r in music_recs]) if music_recs else "- Try some calming instrumentals"}
+
+**Activities to Try:**
+{chr(10).join([f"- {r['content']} - {r['reason']}" for r in activity_recs]) if activity_recs else "- Take a mindful walk"}
+
+Would you like more specific recommendations for any category?"""
+        
+        # Work/Career stress
+        elif "work" in detected_topics:
+            response = f"""Work challenges can be draining, {name}. Here are some strategies:
+
+**Managing Work Stress:**
+1. **Prioritize** - Focus on 3 most important tasks each day
+2. **Take breaks** - Short breaks every 90 minutes improve focus
+3. **Set boundaries** - Define when work ends for the day
+4. **Communicate** - Talk to your manager if workload is unsustainable
+
+**After Work Recovery:**
+- Have a transition ritual (change clothes, take a walk)
+- Avoid checking emails in evening
+- Do something you enjoy daily
+
+What's happening at work? I'm here to help you think through it."""
+        
+        # Relationship issues
+        elif "relationship" in detected_topics:
+            response = f"""Relationships are complex, {name}. Here's some guidance:
+
+**Healthy Communication:**
+1. **Listen actively** - Focus on understanding, not just responding
+2. **Use "I" statements** - "I feel..." instead of "You always..."
+3. **Pick your timing** - Important conversations need calm moments
+4. **Validate feelings** - Even if you disagree, acknowledge their perspective
+
+**Self-reflection questions:**
+- What do I need from this relationship?
+- Am I communicating my needs clearly?
+- What's my part in this situation?
+
+Would you like to talk about a specific relationship situation?"""
+        
+        # Motivation
+        elif "motivation" in detected_topics:
+            response = f"""Motivation can ebb and flow, {name}. Here's how to build it:
+
+**Finding Motivation:**
+1. **Start tiny** - Commit to just 2 minutes of any task
+2. **Connect to your "why"** - Why does this matter to you?
+3. **Remove friction** - Make the first step as easy as possible
+4. **Track progress** - Small wins build momentum
+5. **Reward yourself** - Celebrate completed tasks
+
+**When motivation is low:**
+- Rely on discipline, not just motivation
+- Change your environment
+- Do the task you're avoiding first
+
+What are you trying to find motivation for? I can help you break it down."""
+        
+        # Confidence
+        elif "confidence" in detected_topics:
+            response = f"""Building confidence is a journey, {name}. Here are some strategies:
+
+**Building Self-Confidence:**
+1. **Challenge negative self-talk** - Would you say that to a friend?
+2. **Recall past successes** - You've overcome challenges before
+3. **Prepare thoroughly** - Competence builds confidence
+4. **Power poses** - Stand tall for 2 minutes before challenging situations
+5. **Accept imperfection** - Confidence isn't about being perfect
+
+**Daily practices:**
+- List 3 things you did well today
+- Accept compliments gracefully
+- Set and achieve small goals
+
+What area would you like to feel more confident in?"""
+        
+        # General question - provide helpful response
+        elif is_question:
+            response = f"""That's a great question, {name}. Let me help you with that.
+
+Based on your {mood} mood and what you're asking, here's my perspective:
+
+{message} is something many people wonder about. While I'm a wellness companion (not a search engine), I can offer support in areas like:
+- Emotional wellbeing and mental health
+- Stress management and relaxation
+- Sleep, exercise, and self-care
+- Relationships and communication
+- Motivation and goal-setting
+
+Could you tell me more about what you're looking for? I want to give you the most helpful response."""
+        
+        # General sharing/venting - be supportive
+        elif sentiment < -0.2:
+            response = f"""I hear you, {name}. It sounds like you're going through something difficult. 
+
+Thank you for sharing that with me. Whatever you're feeling is valid. You don't have to have it all figured out.
+
+Sometimes it helps to:
+- Put feelings into words (which you're doing!)
+- Take things one moment at a time
+- Be as kind to yourself as you'd be to a friend
+
+What would feel most supportive right now - talking more about it, or would you like some calming techniques?"""
+        
+        # Positive sharing
+        elif sentiment > 0.2:
+            response = f"""That's great to hear, {name}! Your positive energy comes through.
+
+It's wonderful when things are going well. Taking time to notice and appreciate good moments actually strengthens their impact on your wellbeing.
+
+What's contributing to this positive feeling? I'd love to hear more!"""
+        
+        # Default - acknowledge and ask clarifying question
+        else:
+            response = f"""Thanks for sharing, {name}. I want to make sure I understand and give you the most helpful response.
+
+Your current mood is {mood}, and I'm here to support you however I can. 
+
+Could you tell me more about:
+- What's on your mind right now?
+- Is there something specific you'd like help with?
+- Or would you just like to chat?
+
+I can help with wellness tips, emotional support, recommendations, or just listen."""
+        
         return {"response": response}
     except Exception as e:
         print(f"Chat error: {e}")
